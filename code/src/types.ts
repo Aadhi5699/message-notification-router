@@ -223,3 +223,50 @@ export const RoutingDecisionSchema = z.object({
 });
 
 export type RoutingDecision = z.infer<typeof RoutingDecisionSchema>;
+
+// ---------------------------------------------------------------------------
+// Context Builder Schema & Types
+// ---------------------------------------------------------------------------
+
+export interface NotificationLoad {
+  totalSent: number;
+  totalDismissed: number;
+  dismissRate: number;
+  daysCovered: number;
+}
+
+export interface MessageContext {
+  /** Raw incoming message being routed. */
+  message: IncomingMessage;
+
+  /** Receiving user profile & preferences. Throws error if missing. */
+  user: User;
+
+  /** Whether the message arrived during receiving user's quiet hours (DND window). */
+  isDuringQuietHours: boolean;
+
+  /** Sender user profile & preferences (for personal/direct messages). */
+  senderUser?: User;
+
+  /** Group metadata (if conversation_type === "group"). */
+  group?: Group;
+
+  /** Receiving user's membership in the group (role, mute state, activity). */
+  receiverGroupMembership?: GroupMember;
+
+  /** Sender's membership in the group (role, activity). */
+  senderGroupMembership?: GroupMember;
+
+  /** Business account metadata (if conversation_type === "business"). */
+  business?: BusinessAccount;
+
+  /** Whether the sender uses the official verified domain of the business. */
+  isBusinessDomainTrusted: boolean;
+
+  /** User's relationship/history with the business. */
+  userBusinessRelationship?: UserBusinessHistory;
+
+  /** Aggregated notification load stats for the receiving user. */
+  recentNotificationLoad: NotificationLoad;
+}
+
