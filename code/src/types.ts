@@ -225,6 +225,26 @@ export const RoutingDecisionSchema = z.object({
 export type RoutingDecision = z.infer<typeof RoutingDecisionSchema>;
 
 // ---------------------------------------------------------------------------
+// Routing Failure — returned when the SDK cannot produce a valid decision
+// ---------------------------------------------------------------------------
+
+export interface RoutingFailure {
+  message_id: string;
+  /** Human-readable description of why routing failed. */
+  error: string;
+  /** How many attempts were made before giving up. */
+  attempt: number;
+}
+
+/** Discriminated union: either a valid decision or an explicit failure record. */
+export type RoutingResult = RoutingDecision | RoutingFailure;
+
+/** Type guard — RoutingFailure has an `error` field; RoutingDecision does not. */
+export function isRoutingFailure(r: RoutingResult): r is RoutingFailure {
+  return "error" in r;
+}
+
+// ---------------------------------------------------------------------------
 // Context Builder Schema & Types
 // ---------------------------------------------------------------------------
 
