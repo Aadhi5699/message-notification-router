@@ -270,3 +270,31 @@ export interface MessageContext {
   recentNotificationLoad: NotificationLoad;
 }
 
+// ---------------------------------------------------------------------------
+// Safety & Evidence Types
+// ---------------------------------------------------------------------------
+
+export interface SafetyResult {
+  /** True if the message is flagged for any safety violation. */
+  isFlagged: boolean;
+  
+  /** True if domain spoofing or an unverified business is detected. */
+  isSpoofedOrUnverified: boolean;
+  
+  /** True if suspicious credential requests (OTP, PIN, passwords) are found. */
+  hasPhishingContent: boolean;
+  
+  /** True if prompt injection patterns are detected. */
+  hasPromptInjection: boolean;
+  
+  /** Suggested immediate action if flagged (e.g., 'mute'), or null. */
+  suggestedAction: Action | null;
+  
+  /** Suggested message_type if flagged (e.g., 'scam'), or null. */
+  suggestedMessageType: MessageType | null;
+  
+  /** Reason for the flag, if any. */
+  reason: string | null;
+}
+
+
