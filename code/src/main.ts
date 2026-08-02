@@ -1,15 +1,3 @@
-/**
- * main.ts — Production orchestrator for the WhatsApp Message Notification Router.
- *
- * Processes dataset/messages.csv through the routing pipeline.
- * Usage:
- *   npx tsx src/main.ts --limit 1
- *   npx tsx src/main.ts --all
- *   npx tsx src/main.ts --message-id msg_123
- *   npx tsx src/main.ts --force-message msg_123
- *   npx tsx src/main.ts --force-media voice
- */
-
 import "dotenv/config";
 import { resolve, dirname } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -17,12 +5,14 @@ import { fileURLToPath } from "node:url";
 import { stringify } from "csv-stringify/sync";
 
 import { loadAllData, DATASET_DIR } from "./data-loader.js";
-import { type IncomingMessage, type RoutingDecision, isRoutingFailure } from "./types.js";
+import { type IncomingMessage, type RoutingDecision, type ReviewerVerdict, isRoutingFailure } from "./types.js";
 import { buildMessageContext } from "./context-builder.js";
 import { evaluateSafety } from "./safety-guard.js";
 import { retrieveEvidence } from "./evidence-retriever.js";
 import { processMedia } from "./multimodal.js";
-import { routeMessage } from "./router.js";
+import { needsReview, reviewMessage } from "./reviewer.js";
+import { judgeMessage } from "./judge.js";
+import { isReviewerFailure } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -31,6 +21,7 @@ import { routeMessage } from "./router.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRATCH_DIR = resolve(__dirname, "../scratch");
 const CACHE_FILE = resolve(SCRATCH_DIR, "predictions_cache.json");
+const REVIEW_CACHE_FILE = resolve(SCRATCH_DIR, "review_cache.json");
 const OUTPUT_FILE = resolve(DATASET_DIR, "output.csv");
 
 // ---------------------------------------------------------------------------
@@ -59,6 +50,28 @@ function saveCache(cache: Cache): void {
   writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), "utf-8");
 }
 
+interface ReviewCacheEntry {
+  reviewerVerdict: ReviewerVerdict;
+  judgeDecision?: RoutingDecision;
+  timestamp: string;
+}
+
+type ReviewCache = Record<string, ReviewCacheEntry>;
+
+function loadReviewCache(): ReviewCache {
+  if (!existsSync(REVIEW_CACHE_FILE)) return {};
+  try {
+    return JSON.parse(readFileSync(REVIEW_CACHE_FILE, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveReviewCache(cache: ReviewCache): void {
+  mkdirSync(SCRATCH_DIR, { recursive: true });
+  writeFileSync(REVIEW_CACHE_FILE, JSON.stringify(cache, null, 2), "utf-8");
+}
+
 // ---------------------------------------------------------------------------
 // CLI argument parsing
 // ---------------------------------------------------------------------------
@@ -66,8 +79,7 @@ function saveCache(cache: Cache): void {
 interface CliArgs {
   limit: number;
   messageId?: string;
-  forceMessage?: string;
-  forceMedia?: string;
+  reviewStats?: boolean;
 }
 
 function parseArgs(): CliArgs {
@@ -81,16 +93,10 @@ function parseArgs(): CliArgs {
     return cliArgs;
   }
 
-  const forceMsgIdx = args.indexOf("--force-message");
-  if (forceMsgIdx !== -1 && args[forceMsgIdx + 1]) {
-    cliArgs.forceMessage = args[forceMsgIdx + 1];
-    cliArgs.limit = 1;
+  if (args.includes("--review-stats")) {
+    cliArgs.reviewStats = true;
+    cliArgs.limit = Infinity;
     return cliArgs;
-  }
-
-  const forceMediaIdx = args.indexOf("--force-media");
-  if (forceMediaIdx !== -1 && args[forceMediaIdx + 1]) {
-    cliArgs.forceMedia = args[forceMediaIdx + 1];
   }
 
   if (args.includes("--all")) {
@@ -109,14 +115,8 @@ function parseArgs(): CliArgs {
     return cliArgs;
   }
 
-  if (!cliArgs.forceMedia) {
-    console.error("Usage: npx tsx src/main.ts [--limit <N> | --all | --message-id <ID> | --force-message <ID> | --force-media <type>]");
-    process.exit(1);
-  }
-
-  // If only --force-media is provided, default to --all for that media
-  cliArgs.limit = Infinity;
-  return cliArgs;
+  console.error("Usage: npx tsx src/main.ts [--limit <N> | --all | --message-id <ID>]");
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ function parseArgs(): CliArgs {
 // ---------------------------------------------------------------------------
 
 function generateOutputCsv(messages: IncomingMessage[], cache: Cache): void {
-  console.log(`\n💾 Generating ${OUTPUT_FILE}...`);
+  console.log(`\nGenerating ${OUTPUT_FILE}...`);
   
   const records = messages.map((msg) => {
     const cached = cache[msg.message_id];
@@ -138,7 +138,6 @@ function generateOutputCsv(messages: IncomingMessage[], cache: Cache): void {
         evidence_message_ids: (cached.prediction.evidence_message_ids || "none").replace(/,\s*/g, ";")
       };
     }
-    // Fallback if not evaluated yet (so the CSV always matches messages.csv rows)
     return {
       message_id: msg.message_id,
       action: "",
@@ -149,167 +148,226 @@ function generateOutputCsv(messages: IncomingMessage[], cache: Cache): void {
     };
   });
 
-  const csvContent = stringify(records, {
-    header: true,
-    columns: ["message_id", "action", "message_type", "reason", "confidence", "evidence_message_ids"],
-  });
-
-  writeFileSync(OUTPUT_FILE, csvContent, "utf-8");
-  console.log(`✅ output.csv written successfully with ${records.length} rows.`);
+  const csvString = stringify(records, { header: true });
+  writeFileSync(OUTPUT_FILE, csvString, "utf-8");
+  console.log(`Saved output to ${OUTPUT_FILE}`);
 }
 
 // ---------------------------------------------------------------------------
-// Main Pipeline
+// Main Orchestrator
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const { limit, messageId, forceMessage, forceMedia } = parseArgs();
-  console.log(`\n🔄 main: Loading dataset...`);
+async function run() {
+  const { limit, messageId } = parseArgs();
 
-  // 1. Load data
+  console.log("Loading datasets...");
   const data = await loadAllData();
   const allMessages = data.messages;
 
-  // 2. Print initial counts
-  const total = allMessages.length;
-  const textCount = allMessages.filter((m) => m.media_type === "" || !m.media_type).length;
-  const imageCount = allMessages.filter((m) => m.media_type === "image").length;
-  const voiceCount = allMessages.filter((m) => m.media_type === "voice").length;
+  console.log(`Loaded ${allMessages.length} messages from dataset.`);
   
-  console.log(`\n📊 Target Messages:`);
-  console.log(`  Total: ${total}`);
-  console.log(`  Text:  ${textCount}`);
-  console.log(`  Image: ${imageCount}`);
-  console.log(`  Voice: ${voiceCount}\n`);
-
-  // 3. Load Cache
   const cache = loadCache();
-  const cachedCount = Object.keys(cache).length;
-  if (cachedCount > 0) {
-    console.log(`💾 Cache has ${cachedCount} previously evaluated predictions.`);
+  const reviewCache = loadReviewCache();
+
+  if (messageId) {
+    const existsInMessages = allMessages.some(m => m.message_id === messageId);
+    if (!existsInMessages) {
+      console.error(`Error: Requested message ${messageId} not found in messages.csv.`);
+      process.exit(1);
+    }
+    if (!cache[messageId]) {
+      console.error(`Error: Requested message ${messageId} not found in predictions_cache.json.`);
+      process.exit(1);
+    }
   }
 
-  // 4. Determine processing list
+  // Metrics
+  let totalPredictions = allMessages.length;
+  let eligibleCount = 0;
+  let skippedCount = 0; // Did not meet needsReview gate OR already processed
+  let reviewerApproved = 0;
+  let reviewerChallenged = 0;
+  let reviewerFailed = 0;
+  let judgeInvoked = 0;
+  let judgeChangedDecision = 0;
+  let judgeKeptRouter = 0;
+  let judgeFailed = 0;
+  let finalRouterSource = 0;
+  let finalJudgeSource = 0;
+
+  // Filter messages to process
   let toProcess: IncomingMessage[] = [];
-
-  if (forceMessage) {
-    const target = allMessages.find((s) => s.message_id === forceMessage);
-    if (!target) {
-      console.error(`❌ Message ID "${forceMessage}" not found.`);
-      process.exit(1);
-    }
-    toProcess = [target];
-    console.log(`🎯 Processing specific message (forced): ${forceMessage}`);
-  } else if (messageId) {
-    const target = allMessages.find((s) => s.message_id === messageId);
-    if (!target) {
-      console.error(`❌ Message ID "${messageId}" not found.`);
-      process.exit(1);
-    }
-    if (cache[target.message_id]) {
-      console.log(`✅ Message ${messageId} is already cached. Skipping.`);
-    } else {
-      toProcess = [target];
-      console.log(`🎯 Processing specific message: ${messageId}`);
-    }
-  } else {
-    // Filter out cached messages unless forced by media type
-    let uncached = allMessages;
-    
-    if (forceMedia) {
-      uncached = uncached.filter((m) => m.media_type === forceMedia);
-      
-      if (forceMedia === "voice") {
-        uncached = uncached.filter((m) => {
-          const c = cache[m.message_id];
-          if (c && c.voice_transcribed === true) return false;
-          return true; // Transcribe if uncached or voice_transcribed is false
-        });
-      }
-      
-      console.log(`🔍 Forced media type: ${forceMedia} (found ${uncached.length} matching messages to process)`);
-    } else {
-      uncached = uncached.filter((m) => !cache[m.message_id]);
-    }
-
-    toProcess = uncached.slice(0, limit === Infinity ? uncached.length : limit);
-    console.log(`🎯 Will process ${toProcess.length} message(s).`);
-  }
-
-  if (toProcess.length === 0) {
-    console.log("✅ All specified messages are already cached or nothing to do.\n");
-  }
-
-  // 5. Process loop
-  let successCount = 0;
-  let failCount = 0;
-
-  for (const msg of toProcess) {
+  
+  for (const msg of allMessages) {
     const msgId = msg.message_id;
-    console.log(`\n--- Processing ${msgId} ---`);
+    const cachedPred = cache[msgId];
+    
+    if (!cachedPred) {
+      console.warn(`Warning: No router prediction found for ${msgId}. Skipping.`);
+      continue;
+    }
 
-    try {
+    const ctx = buildMessageContext(msg, data);
+    const safety = evaluateSafety(ctx);
+    
+    let isEligible = false;
+    
+    if (messageId) {
+      isEligible = (msgId === messageId);
+    } else if (needsReview(ctx, safety, cachedPred.prediction)) {
+      isEligible = true;
+    }
+
+    if (!isEligible) {
+      if (!messageId) skippedCount++; // Only count skipped if we aren't targeting a specific message
+      continue;
+    }
+
+    eligibleCount++;
+
+    if (reviewCache[msgId]) {
+      // Already fully reviewed and cached
+      const rc = reviewCache[msgId];
+      if (rc.reviewerVerdict.verdict === "approve") {
+        reviewerApproved++;
+      } else {
+        reviewerChallenged++;
+        judgeInvoked++;
+        if (rc.judgeDecision) {
+           // We have a successful judge decision cached
+           if (rc.judgeDecision.action === cachedPred.prediction.action && rc.judgeDecision.message_type === cachedPred.prediction.message_type) {
+             judgeKeptRouter++;
+           } else {
+             judgeChangedDecision++;
+           }
+        } else {
+           judgeFailed++; // cached a challenge but no judge decision? This means judge failed originally.
+        }
+      }
+      continue; // Skip running it again
+    }
+
+    toProcess.push(msg);
+  }
+
+  // Limit processing
+  if (limit !== Infinity && toProcess.length > limit) {
+    toProcess = toProcess.slice(0, limit);
+  }
+
+  console.log(`\nWill process ${toProcess.length} uncached eligible review(s).`);
+
+  const { reviewStats } = parseArgs();
+  
+  if (!reviewStats) {
+    for (const msg of toProcess) {
+      const msgId = msg.message_id;
+      console.log(`\n--- Reviewing ${msgId} ---`);
+      
+      const cachedPred = cache[msgId];
       const ctx = buildMessageContext(msg, data);
-      const safety = evaluateSafety(ctx);
-      const evidence = retrieveEvidence(ctx, data);
-      const media = await processMedia(ctx, data);
+    const safety = evaluateSafety(ctx);
+    const evidence = retrieveEvidence(ctx, data);
+    const media = await processMedia(ctx, data);
+    
+    if (messageId) {
+      console.log(`Requested message: ${messageId}`);
+    }
+    console.log(`Selected message: ${msgId}`);
+    
+    console.log(`  Invoking Reviewer...`);
+    const reviewerResult = await reviewMessage(ctx, safety, evidence, media, cachedPred.prediction);
 
-      console.log(`  Safety: flagged=${safety.isFlagged} | Evidence: ${evidence.length} msgs | Media: ${media.type}`);
+    if (isReviewerFailure(reviewerResult)) {
+      console.error(`  ❌ Reviewer FAILED: ${reviewerResult.error}`);
+      reviewerFailed++;
+      continue;
+    }
 
-      const result = await routeMessage(ctx, safety, evidence, media);
+    if (reviewerResult.verdict === "approve") {
+      console.log(`  ✅ Reviewer Approved: ${reviewerResult.critique}`);
+      reviewerApproved++;
+      reviewCache[msgId] = {
+        reviewerVerdict: reviewerResult,
+        timestamp: new Date().toISOString()
+      };
+      saveReviewCache(reviewCache);
+    } else {
+      console.log(`  ⚠️ Reviewer Challenged: ${reviewerResult.critique}`);
+      reviewerChallenged++;
+      judgeInvoked++;
 
-      if (isRoutingFailure(result)) {
-        console.error(`  ❌ ROUTING FAILED: ${result.error}`);
-        failCount++;
+      console.log(`  Invoking Judge...`);
+      const judgeResult = await judgeMessage(ctx, safety, evidence, media, cachedPred.prediction, reviewerResult);
+      
+      if (isRoutingFailure(judgeResult)) {
+        console.error(`  ❌ Judge FAILED: ${judgeResult.error}`);
+        judgeFailed++;
+        // We still cache the reviewer challenge so we don't re-run reviewer, 
+        // but we don't have a judgeDecision.
+        reviewCache[msgId] = {
+          reviewerVerdict: reviewerResult,
+          timestamp: new Date().toISOString()
+        };
+        saveReviewCache(reviewCache);
         continue;
       }
 
-      const isVoice = media.type === "voice";
+      console.log(`  ⚖️ Judge Decision: action=${judgeResult.action}, type=${judgeResult.message_type}, conf=${judgeResult.confidence}`);
+      
+      if (judgeResult.action === cachedPred.prediction.action && judgeResult.message_type === cachedPred.prediction.message_type) {
+        judgeKeptRouter++;
+      } else {
+        judgeChangedDecision++;
+      }
 
-      // Checkpoint cache
-      cache[msgId] = { 
-        prediction: result, 
-        timestamp: new Date().toISOString(),
-        ...(isVoice ? { voice_transcribed: true } : {})
+      reviewCache[msgId] = {
+        reviewerVerdict: reviewerResult,
+        judgeDecision: judgeResult,
+        timestamp: new Date().toISOString()
       };
-      saveCache(cache);
-      successCount++;
+      saveReviewCache(reviewCache);
 
-      console.log(`  ✅ Prediction: action=${result.action}, type=${result.message_type}, confidence=${result.confidence}`);
-      console.log(`     Reason: ${result.reason}`);
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`  ❌ PIPELINE ERROR: ${errMsg}`);
-      failCount++;
+      // Overwrite primary prediction
+      cache[msgId].prediction = judgeResult;
+      cache[msgId].timestamp = new Date().toISOString();
+      saveCache(cache);
+    }
     }
   }
 
-  // 6. Print Run Summary
-  console.log("\n" + "=".repeat(80));
-  console.log("📊 RUN SUMMARY");
-  console.log("=".repeat(80));
-
-  if (toProcess.length > 0) {
-    console.log(`  Processed: ${toProcess.length} | Success: ${successCount} | Failed: ${failCount}`);
+  // Calculate Final Sources
+  for (const msg of allMessages) {
+    const rc = reviewCache[msg.message_id];
+    if (rc && rc.judgeDecision) {
+      finalJudgeSource++;
+    } else {
+      finalRouterSource++;
+    }
   }
 
-  const finalCachedCount = Object.keys(cache).length;
-  console.log(`  Total cached predictions: ${finalCachedCount} / ${total}`);
+  console.log(`\n=== Final Counts ===`);
+  console.log(`Total Predictions: ${totalPredictions}`);
+  console.log(`Eligible: ${eligibleCount}`);
+  console.log(`Skipped (Gate/Cached): ${skippedCount}`);
+  console.log(`Reviewer Approved: ${reviewerApproved}`);
+  console.log(`Reviewer Challenged: ${reviewerChallenged}`);
+  console.log(`Reviewer Failed: ${reviewerFailed}`);
+  console.log(`Judge Invoked: ${judgeInvoked}`);
+  console.log(`Judge Changed Decision: ${judgeChangedDecision}`);
+  console.log(`Judge Kept Router: ${judgeKeptRouter}`);
+  console.log(`Judge Failed: ${judgeFailed}`);
+  console.log(`Final Router Source: ${finalRouterSource}`);
+  console.log(`Final Judge Source: ${finalJudgeSource}`);
 
-  // 7. Write output.csv if we have any cached predictions
-  generateOutputCsv(allMessages, cache);
-
-  if (failCount > 0) {
-    console.log(`\n⚠️ Some messages failed routing. You can rerun the orchestrator to retry them.`);
-    process.exit(1);
+  if (!reviewStats) {
+    generateOutputCsv(allMessages, cache);
+  } else {
+    console.log(`\nReview stats calculated (dry run). No changes made.`);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Run
-// ---------------------------------------------------------------------------
-
-main().catch((err) => {
+run().catch((err) => {
   console.error("Fatal error:", err);
   process.exit(1);
 });

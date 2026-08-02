@@ -318,3 +318,29 @@ export interface SafetyResult {
 }
 
 
+
+// ---------------------------------------------------------------------------
+// Reviewer Output Schema
+// ---------------------------------------------------------------------------
+
+export const ReviewerVerdictSchema = z.object({
+  verdict: z.enum(["approve", "challenge"]),
+  critique: z.string().min(1),
+  suggested_action: ActionEnum.optional(),
+  suggested_message_type: MessageTypeEnum.optional(),
+});
+
+export type ReviewerVerdict = z.infer<typeof ReviewerVerdictSchema>;
+
+export interface ReviewerFailure {
+  message_id: string;
+  error: string;
+  attempt: number;
+}
+
+export type ReviewerResult = ReviewerVerdict | ReviewerFailure;
+
+export function isReviewerFailure(r: ReviewerResult): r is ReviewerFailure {
+  return "error" in r;
+}
+

@@ -533,13 +533,13 @@
   "msg_033": {
     "prediction": {
       "message_id": "msg_033",
-      "action": "digest",
-      "message_type": "greeting",
-      "reason": "Group message from a non-admin family member who explicitly states \"nothing urgent\"; sender's history shows a pattern of generic broadcast-style greetings and chain messages, making this a routine check-in.",
-      "confidence": 0.72,
-      "evidence_message_ids": "message_0121, message_0122"
+      "action": "notify",
+      "message_type": "personal",
+      "reason": "This is a personally-addressed welfare check from an elder (\"beta\") asking if the receiver reached office safely, with an explicit callback request — not a generic greeting. The Router's historical evidence of broadcast messages actually contrasts with this targeted, original (forwarded_count: 0) safety check-in.",
+      "confidence": 0.82,
+      "evidence_message_ids": "message_0121;message_0122"
     },
-    "timestamp": "2026-08-02T07:21:03.917Z"
+    "timestamp": "2026-08-02T09:48:07.891Z"
   },
   "msg_061": {
     "prediction": {
