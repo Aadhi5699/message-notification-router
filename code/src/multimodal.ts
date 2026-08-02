@@ -1,52 +1,31 @@
-/**
- * multimodal.ts — Resolves media file paths for the incoming message.
- *
- * Image files:
- *   Resolves the absolute path from images.csv metadata.
- *   The Claude Agent SDK's built-in Read tool will read the image natively
- *   (including Base64/MIME handling). We do NOT manually encode here.
- *
- * Voice notes:
- *   Resolves the absolute path. Transcription is intentionally skipped.
- *   The interface is extensible so local Whisper transcription can be added
- *   later without changing the Router contract.
- */
-
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { pipeline } from "@xenova/transformers";
+import audioDecode from "audio-decode";
+import pkg from "wavefile";
+const { WaveFile } = pkg;
 import type { MessageContext } from "./types.js";
 import type { DataStore } from "./data-loader.js";
 
-// ---------------------------------------------------------------------------
-// ProcessedMedia — what the router receives
-// ---------------------------------------------------------------------------
+// Lazy-loaded transcriber instance
+let transcriber: any = null;
+
+async function getTranscriber() {
+  if (!transcriber) {
+    console.log("Loading Whisper model...");
+    transcriber = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny.en");
+  }
+  return transcriber;
+}
 
 export interface ProcessedMedia {
   type: "image" | "voice" | "none";
-
-  /** Absolute file path for the image (SDK's Read tool will read it). */
   filePath?: string;
-
-  /** Voice note transcription status. */
-  voiceStatus?: string;
-
-  /** Absolute file path for the voice note (for future transcription). */
+  voiceTranscript?: string;
   voicePath?: string;
 }
 
-// ---------------------------------------------------------------------------
-// processMedia — resolves paths, does NOT load file contents
-// ---------------------------------------------------------------------------
-
-/**
- * Resolves media attached to the incoming message.
- *
- * For images: returns the absolute path so the router prompt can instruct
- * the Claude Agent SDK to read the image via its built-in Read tool.
- *
- * For voice notes: returns the path and a "transcription_skipped" status.
- */
-export function processMedia(ctx: MessageContext, data: DataStore): ProcessedMedia {
+export async function processMedia(ctx: MessageContext, data: DataStore): Promise<ProcessedMedia> {
   const { media_type, media_id } = ctx.message;
 
   if (media_type === "image" && media_id) {
@@ -64,11 +43,33 @@ export function processMedia(ctx: MessageContext, data: DataStore): ProcessedMed
     const voiceRecord = data.voiceNoteMap.get(media_id);
     if (voiceRecord) {
       const fullPath = resolve(data.datasetDir, voiceRecord.file_path);
-      return {
-        type: "voice",
-        voicePath: fullPath,
-        voiceStatus: "transcription_skipped",
-      };
+      if (existsSync(fullPath)) {
+        console.log(`Transcribing voice note: ${media_id}`);
+        try {
+          const buffer = readFileSync(fullPath);
+          const decoded = await audioDecode(buffer);
+          const float32Array = decoded.channelData[0];
+          
+          const wav = new WaveFile();
+          wav.fromScratch(1, decoded.sampleRate, "32f", float32Array);
+          wav.toSampleRate(16000);
+          const audioData = wav.getSamples();
+          
+          const t = await getTranscriber();
+          const out = await t(audioData);
+          
+          return {
+            type: "voice",
+            voicePath: fullPath,
+            voiceTranscript: out.text.trim()
+          };
+        } catch (err) {
+          console.error(`[multimodal] Error transcribing voice note ${fullPath}:`, err);
+          return { type: "voice", voicePath: fullPath, voiceTranscript: "<TRANSCRIPTION FAILED>" };
+        }
+      } else {
+        console.warn(`[multimodal] Voice file not found at ${fullPath}`);
+      }
     }
   }
 

@@ -135,7 +135,7 @@ function generateOutputCsv(messages: IncomingMessage[], cache: Cache): void {
         message_type: cached.prediction.message_type,
         reason: cached.prediction.reason,
         confidence: cached.prediction.confidence,
-        evidence_message_ids: cached.prediction.evidence_message_ids || "none"
+        evidence_message_ids: (cached.prediction.evidence_message_ids || "none").replace(/,\s*/g, ";")
       };
     }
     // Fallback if not evaluated yet (so the CSV always matches messages.csv rows)
@@ -218,7 +218,16 @@ async function main() {
     
     if (forceMedia) {
       uncached = uncached.filter((m) => m.media_type === forceMedia);
-      console.log(`🔍 Forced media type: ${forceMedia} (found ${uncached.length} matching messages)`);
+      
+      if (forceMedia === "voice") {
+        uncached = uncached.filter((m) => {
+          const c = cache[m.message_id];
+          if (c && c.voice_transcribed === true) return false;
+          return true; // Transcribe if uncached or voice_transcribed is false
+        });
+      }
+      
+      console.log(`🔍 Forced media type: ${forceMedia} (found ${uncached.length} matching messages to process)`);
     } else {
       uncached = uncached.filter((m) => !cache[m.message_id]);
     }
@@ -243,7 +252,7 @@ async function main() {
       const ctx = buildMessageContext(msg, data);
       const safety = evaluateSafety(ctx);
       const evidence = retrieveEvidence(ctx, data);
-      const media = processMedia(ctx, data);
+      const media = await processMedia(ctx, data);
 
       console.log(`  Safety: flagged=${safety.isFlagged} | Evidence: ${evidence.length} msgs | Media: ${media.type}`);
 
@@ -255,14 +264,13 @@ async function main() {
         continue;
       }
 
-      // Voice transcription remains skipped for now; mark cached prediction
       const isVoice = media.type === "voice";
 
       // Checkpoint cache
       cache[msgId] = { 
         prediction: result, 
         timestamp: new Date().toISOString(),
-        ...(isVoice ? { voice_transcribed: false } : {})
+        ...(isVoice ? { voice_transcribed: true } : {})
       };
       saveCache(cache);
       successCount++;

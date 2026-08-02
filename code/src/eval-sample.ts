@@ -209,7 +209,7 @@ async function main() {
       const ctx = buildMessageContext(incomingMsg, data);
       const safety = evaluateSafety(ctx);
       const evidence = retrieveEvidence(ctx, data);
-      const media = processMedia(ctx, data);
+      const media = await processMedia(ctx, data);
 
       console.log(`  Safety: flagged=${safety.isFlagged} | Evidence: ${evidence.length} msgs | Media: ${media.type}`);
 
