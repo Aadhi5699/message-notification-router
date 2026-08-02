@@ -29,6 +29,12 @@ import {
 import type { ProcessedMedia } from "./multimodal.js";
 
 // ---------------------------------------------------------------------------
+// Model configuration
+// ---------------------------------------------------------------------------
+
+const MODEL = "claude-sonnet-4-6";
+
+// ---------------------------------------------------------------------------
 // JSON Schema for the LLM structured output (excludes message_id)
 // ---------------------------------------------------------------------------
 
@@ -70,6 +76,9 @@ PRIMARY ROUTING RULES:
 9. Payment/Transaction: Payment confirmations, OTP from verified businesses → "notify" with message_type="payment" or "urgent".
 
 If an image is attached, use the Read tool to examine it for visible text, promotional content, QR codes, URLs, scam indicators, or urgency signals.
+
+REASON CONCISENESS RULE:
+The "reason" field must contain at most 2 short sentences and preferably <= 40 words. State only the strongest factors that caused the routing decision. Do not enumerate every context statistic.
 
 Return your decision as structured JSON output matching the schema provided.
 Use "none" for evidence_message_ids when no relevant historical messages exist.`;
@@ -183,6 +192,7 @@ export async function routeMessage(
   }
 
   try {
+    console.log(`requested_model: ${MODEL}`);
     for await (const message of query({
       prompt,
       options: {
@@ -192,11 +202,31 @@ export async function routeMessage(
           schema: routerJsonSchema,
         },
         ...(allowedTools.length > 0 ? { allowedTools } : {}),
+        model: MODEL,
         permissionMode: "acceptEdits",
         maxTurns: 3,
       },
     })) {
       if (message.type === "result") {
+        const usage = (message as any).usage || {};
+        const modelUsage = (message as any).modelUsage || {};
+        const modelsUsed = Object.keys(modelUsage);
+
+        if (modelsUsed.length > 0) {
+          for (const m of modelsUsed) {
+            console.log(`model: ${m}`);
+          }
+        } else {
+          console.log(`model: ${MODEL}`);
+        }
+
+        console.log(`num_turns: ${(message as any).num_turns ?? 0}`);
+        console.log(`input_tokens: ${usage.input_tokens ?? 0}`);
+        console.log(`cache_creation_input_tokens: ${usage.cache_creation_input_tokens ?? 0}`);
+        console.log(`cache_read_input_tokens: ${usage.cache_read_input_tokens ?? 0}`);
+        console.log(`output_tokens: ${usage.output_tokens ?? 0}`);
+        console.log(`total_cost_usd: ${(message as any).total_cost_usd ?? 0}`);
+
         // --- Success with structured output ---
         if (
           message.subtype === "success" &&

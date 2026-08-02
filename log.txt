@@ -151,3 +151,133 @@ repo_root=c:\Users\aadhi\hackerrank-orchestrate-august26
 worktree=main
 parent_agent=none
 
+
+## 2026-08-02T10:05:58+05:30 Implement sample message evaluator and CLI flags
+
+User Prompt (verbatim, secrets redacted):
+can you add the model as sonnet in the router.ts, we don't have any mention of the model here.@[c:\Users\aadhi\hackerrank-orchestrate-august26\code\src\router.ts] 
+
+Implement only code/src/eval-sample.ts , Do not implement or modify main.ts yet.
+
+The goal is to validate our current production routing pipeline using dataset/sample_messages.csv before processing dataset/messages.csv.
+
+npx tsx src/eval-sample.ts --message-id <IMAGE_SAMPLE_ID> 
+
+Implement the above , so we can check for specific message-id also.
+
+Agent Response Summary:
+Configured the router to explicitly set the model parameter in router.ts. Implemented eval-sample.ts to execute the full processing pipeline (context-builder -> safety-guard -> evidence-retriever -> multimodal -> router) on dataset/sample_messages.csv. Added caching of predictions to scratch/sample_eval_cache.json and CLI flag support for --limit <N>, --all, and --message-id <ID>.
+
+Actions:
+* Modified code/src/router.ts to set explicit MODEL configuration.
+* Exported loadCsv and DATASET_DIR in code/src/data-loader.ts.
+* Created code/src/eval-sample.ts with caching and --limit, --all, and --message-id flags.
+* Verified code compiles with tsc --noEmit (0 errors).
+
+Context:
+tool=Antigravity
+branch=main
+repo_root=c:\Users\aadhi\hackerrank-orchestrate-august26
+worktree=main
+parent_agent=none
+
+
+## 2026-08-02T10:15:00+05:30 Add LLM call metrics logging to router
+
+User Prompt (verbatim, secrets redacted):
+can you add the below logging before we make a call
+
+model:
+num_turns:
+input_tokens:
+cache_creation_input_tokens:
+cache_read_input_tokens:
+output_tokens:
+total_cost_usd:
+
+Agent Response Summary:
+Updated code/src/router.ts to extract and log execution metrics (model, num_turns, input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens, total_cost_usd) from the SDKResultMessage when receiving query results.
+
+Actions:
+* Modified code/src/router.ts to add metrics logging block.
+* Verified type safety with tsc --noEmit (0 errors).
+
+Context:
+tool=Antigravity
+branch=main
+repo_root=c:\Users\aadhi\hackerrank-orchestrate-august26
+worktree=main
+parent_agent=none
+
+
+## 2026-08-02T10:41:40+05:30 Update router logging instrumentation and reason conciseness rule
+
+User Prompt (verbatim, secrets redacted):
+Make instrumentation-only changes for the below only, nothing else:
+
+1) Immediately before query(), log: requested_model: <MODEL>
+2) On the result event, iterate through all entries in message.modelUsage rather than object.keys(modelUsage)[0].
+3) Also update the Router system instructions so reason is concise: reason must contain at most 2 short sentences and preferably <= 40 words. State only the strongest factors that caused the routing decision.
+Do not enumerate every context statistic.
+
+Agent Response Summary:
+Updated code/src/router.ts to log requested_model right before calling query(), iterate through all keys in message.modelUsage to log every model used in the query loop, and added reason conciseness instructions to SYSTEM_PROMPT requiring <= 2 short sentences and <= 40 words.
+
+Actions:
+* Modified code/src/router.ts with requested instrumentation and prompt update.
+* Verified compilation with tsc --noEmit (0 errors).
+
+Context:
+tool=Antigravity
+branch=main
+repo_root=c:\Users\aadhi\hackerrank-orchestrate-august26
+worktree=main
+parent_agent=none
+
+
+## 2026-08-02T11:35:00+05:30 Implement main orchestrator
+
+User Prompt (verbatim, secrets redacted):
+Implement code/src/main.ts as the production orchestrator. Do not change the existing architecture or routing logic.
+
+Reuse the validated pipeline: context-builder -> safety-guard -> evidence-retriever -> multimodal -> router
+
+Requirements:
+1) Load all 110 target messages from dataset/messages.csv.
+2) Before processing, print counts for total/text/image/voice messages.
+3) Use scratch/predictions_cache.json, keyed by message_id.
+4) Before every Router call, check the cache. Skip successfully cached messages.
+Immediately checkpoint every successful Zod-validated prediction so interrupted runs can safely resume.
+5) Never cache RoutingFailure as success.
+6) Support:
+--limit N -> process N uncached messages
+--all -> process all remaining uncached messages
+--message-id ID -> process one message
+--force-message ID -> rerun one cached message
+--force-media voice -> later rerun only voice messages after Whisper is implemented
+
+7) Voice transcription remains skipped for now. Mark cached voice predictions with voice_transcribed: false so they can be selectively rerun later.
+
+8) Generate dataset/output.csv from validated cached predictions in original message order with exact columns:
+message_id,action,message_type,reason,confidence,evidence_message_ids
+
+9) evidence_message_ids must be semicolon-separated or none 
+
+10) Router reason must remain concise: maximum 2 sentences, preferably <=40 words.
+
+Follow AGENTS.md logging requirements and never log API keys.
+
+Agent Response Summary:
+Created code/src/main.ts to serve as the production orchestrator. It processes dataset/messages.csv sequentially through the established pipeline with robust caching to scratch/predictions_cache.json. Added support for CLI filtering flags (--limit, --all, --message-id, --force-message, --force-media). The script automatically generates dataset/output.csv with the exact schema matching the Hackathon contract from all available cached predictions.
+
+Actions:
+* Created code/src/main.ts with production orchestrator logic.
+* Validated pipeline typing with tsc --noEmit (0 errors).
+
+Context:
+tool=Antigravity
+branch=main
+repo_root=c:\Users\aadhi\hackerrank-orchestrate-august26
+worktree=main
+parent_agent=none
+

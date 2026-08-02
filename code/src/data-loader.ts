@@ -47,7 +47,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** Absolute path to dataset/ resolved from this file's location. */
-const DATASET_DIR = resolve(import.meta.dirname, "../../dataset");
+export const DATASET_DIR = resolve(import.meta.dirname, "../../dataset");
 
 // ---------------------------------------------------------------------------
 // Generic CSV → Zod parser
@@ -58,7 +58,7 @@ const DATASET_DIR = resolve(import.meta.dirname, "../../dataset");
  * Rows that fail validation are logged and skipped so a single corrupt row
  * does not crash the pipeline.
  */
-async function loadCsv<T>(
+export async function loadCsv<T>(
   filename: string,
   schema: z.ZodType<T>
 ): Promise<T[]> {

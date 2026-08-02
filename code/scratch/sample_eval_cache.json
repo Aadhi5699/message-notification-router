@@ -1,0 +1,46 @@
+{
+  "sample_msg_001": {
+    "prediction": {
+      "message_id": "sample_msg_001",
+      "action": "notify",
+      "message_type": "urgent",
+      "reason": "Time-critical message from a verified group admin (u_043) in a legitimate housing society group, warning of a hard 20-minute window to fill drinking water before the tanker departs. Sent during active hours (11:09, well outside DND of 21:30–06:30), no safety flags, and the receiver's dismiss rate (15.1%) is far below the 60% fatigue threshold. The receiver is a highly engaged group admin who reads every group message and has dismissed only 2 group notifications in 30 days. Historical evidence confirms u_043 is a recurring, legitimate source of Tower B water/plumbing alerts — this message follows the same established pattern. Delaying to digest would cause the receiver to miss the actionable window entirely, making notify the only appropriate routing decision.",
+      "confidence": 0.93,
+      "evidence_message_ids": "message_0001, message_0129, message_0189"
+    },
+    "timestamp": "2026-08-02T04:15:49.280Z"
+  },
+  "sample_msg_044": {
+    "prediction": {
+      "message_id": "sample_msg_044",
+      "action": "digest",
+      "message_type": "promotion",
+      "reason": "This is a routine, repetitive C2C marketplace listing in a large group (Myntra Marketplace, 241 members). The sender (u_048) has posted about the identical kurta set at least four times since April 2026, making this a low-priority repeated promotion. The receiver has near-zero group engagement (only 1 message read in 30 days, 0 replies, 3 dismissals from this group). The attached image is benign — a clothing rack photo consistent with the message text, with no URLs, QR codes, scam indicators, or urgency signals. No safety flags are raised. Not during quiet hours, but the content is not personal or urgent, so batching into a digest is appropriate rather than interrupting immediately.",
+      "confidence": 0.87,
+      "evidence_message_ids": "message_0401, message_0113, message_0332, message_0066"
+    },
+    "timestamp": "2026-08-02T04:30:21.700Z"
+  },
+  "sample_msg_002": {
+    "prediction": {
+      "message_id": "sample_msg_002",
+      "action": "notify",
+      "message_type": "urgent",
+      "reason": "Same-day time-sensitive school bus schedule change posted by a verified group admin during active hours. Parents must have children ready by 7:35 AM — immediate awareness is needed to act in time. The receiver is an active, engaged group admin with zero dismissals in this group and a below-threshold overall dismiss rate (36.6%). No safety flags, group is not muted, and historical messages confirm this sender reliably posts legitimate Route B bus alerts of exactly this nature.",
+      "confidence": 0.93,
+      "evidence_message_ids": "message_0002, message_0133, message_0209"
+    },
+    "timestamp": "2026-08-02T04:47:33.981Z"
+  },
+  "sample_msg_003": {
+    "prediction": {
+      "message_id": "sample_msg_003",
+      "action": "notify",
+      "message_type": "urgent",
+      "reason": "Group admin directly @mentions u_010 for a rescheduled prod review with an EOD client deadline, requiring specific data (queue numbers + failed-payment screenshots). Not in DND, user reads 100% of messages in this group, and dismiss rate is well below the fatigue threshold.",
+      "confidence": 0.93,
+      "evidence_message_ids": "message_0003, message_0170"
+    },
+    "timestamp": "2026-08-02T05:13:09.613Z"
+  }
+}
