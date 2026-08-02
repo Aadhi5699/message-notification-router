@@ -13,6 +13,7 @@ import { processMedia } from "./multimodal.js";
 import { needsReview, reviewMessage } from "./reviewer.js";
 import { judgeMessage } from "./judge.js";
 import { isReviewerFailure } from "./types.js";
+import { routeMessage } from "./router.js";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -158,7 +159,7 @@ function generateOutputCsv(messages: IncomingMessage[], cache: Cache): void {
 // ---------------------------------------------------------------------------
 
 async function run() {
-  const { limit, messageId } = parseArgs();
+  const { limit, messageId, reviewStats } = parseArgs();
 
   console.log("Loading datasets...");
   const data = await loadAllData();
@@ -200,15 +201,34 @@ async function run() {
   
   for (const msg of allMessages) {
     const msgId = msg.message_id;
-    const cachedPred = cache[msgId];
+    let cachedPred = cache[msgId];
     
-    if (!cachedPred) {
-      console.warn(`Warning: No router prediction found for ${msgId}. Skipping.`);
-      continue;
-    }
-
     const ctx = buildMessageContext(msg, data);
     const safety = evaluateSafety(ctx);
+
+    if (!cachedPred) {
+      if (reviewStats) {
+        console.warn(`Warning: No router prediction found for ${msgId}. Cannot calculate stats.`);
+        continue;
+      }
+      
+      console.log(`\n--- Routing ${msgId} ---`);
+      const evidence = retrieveEvidence(ctx, data);
+      const media = await processMedia(ctx, data);
+      const routerDecision = await routeMessage(ctx, safety, evidence, media);
+      
+      if (isRoutingFailure(routerDecision)) {
+        console.error(`  ❌ Router FAILED: ${routerDecision.error}`);
+        continue;
+      }
+      
+      cache[msgId] = {
+        prediction: routerDecision,
+        timestamp: new Date().toISOString()
+      };
+      saveCache(cache);
+      cachedPred = cache[msgId];
+    }
     
     let isEligible = false;
     
@@ -256,8 +276,6 @@ async function run() {
   }
 
   console.log(`\nWill process ${toProcess.length} uncached eligible review(s).`);
-
-  const { reviewStats } = parseArgs();
   
   if (!reviewStats) {
     for (const msg of toProcess) {
