@@ -3,6 +3,7 @@
 This directory contains the runnable solution for the HackerRank Orchestrate Message Notification Router challenge. It implements a robust, end-to-end multi-agent pipeline using TypeScript and the Claude Agent SDK.
 
 # Pipeline Design
+```mermaid
 
 flowchart TD
     A["📨 Incoming Message<br/>Text / Image / Voice"] --> B["Context Builder<br/>User • Sender • Group • Business<br/>DND • Notification Load"]
@@ -53,6 +54,8 @@ flowchart TD
 
     V["scratch/predictions_cache.json"] -. "Resume / reuse" .-> L
     W["scratch/review_cache.json"] -. "Avoid repeated reviews" .-> O
+    ```
+
 
 ## 🛠️ Setup Instructions
 
