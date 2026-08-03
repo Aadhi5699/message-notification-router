@@ -2,6 +2,58 @@
 
 This directory contains the runnable solution for the HackerRank Orchestrate Message Notification Router challenge. It implements a robust, end-to-end multi-agent pipeline using TypeScript and the Claude Agent SDK.
 
+# Pipeline Design
+
+flowchart TD
+    A["📨 Incoming Message<br/>Text / Image / Voice"] --> B["Context Builder<br/>User • Sender • Group • Business<br/>DND • Notification Load"]
+
+    B --> C["🛡️ Safety Guard<br/>Phishing • Prompt Injection<br/>Domain Spoofing • Verification"]
+
+    C --> D["🔎 Evidence Retriever<br/>Relevant Historical Messages<br/>Sender / Group / Business History"]
+
+    D --> E{"Media Type?"}
+
+    E -->|Text| F["Text Context"]
+    E -->|Image| G["Image Context<br/>Claude Visual Analysis"]
+    E -->|Voice| H["Local Whisper ASR<br/>Transformers.js"]
+
+    H --> I["Voice Transcript<br/>Treated as Untrusted Content"]
+
+    F --> J
+    G --> J
+    I --> J
+
+    J["🤖 Primary Router<br/>Claude Sonnet 4.6<br/><br/>Structured RoutingDecision<br/>action • type • reason<br/>confidence • evidence IDs"]
+
+    J --> K["✅ JSON Schema + Zod Validation"]
+
+    K --> L["💾 Prediction Checkpoint"]
+
+    L --> M{"needsReview()?"}
+
+    M -->|"No"| N["Final Router Decision"]
+
+    M -->|"Yes"| O["🔍 Reviewer<br/>Claude Sonnet 4.6<br/>Audit Router Decision"]
+
+    O --> P{"Reviewer Verdict"}
+
+    P -->|"Approve"| N
+
+    P -->|"Challenge"| Q["⚖️ Judge<br/>Claude Opus 4.6<br/>Independent Final Decision"]
+
+    Q --> R{"Valid Judge Output?"}
+
+    R -->|"Yes"| S["Final Judge Decision"]
+    R -->|"Failure"| N
+
+    N --> T["💾 Final Prediction Cache"]
+    S --> T
+
+    T --> U["📄 output.csv<br/>notify / digest / mute"]
+
+    V["scratch/predictions_cache.json"] -. "Resume / reuse" .-> L
+    W["scratch/review_cache.json"] -. "Avoid repeated reviews" .-> O
+
 ## 🛠️ Setup Instructions
 
 1. **Install Dependencies**
