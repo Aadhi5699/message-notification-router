@@ -19,12 +19,12 @@ flowchart TD
     G --> J
     I --> J
 
-    J["Primary Router<br/>Claude Sonnet 4.6<br/>Structured RoutingDecision<br/>action • type • reason<br/>confidence • evidence IDs"] --> K["JSON Schema + Zod Validation"]
+    J["Primary Router<br/>Structured RoutingDecision<br/>action • type • reason<br/>confidence • evidence IDs"] --> K["JSON Schema + Zod Validation"]
     K --> L["Prediction Checkpoint"]
     L --> M{"needsReview()?"}
 
     M -->|"No"| N["Final Router Decision"]
-    M -->|"Yes"| O["Reviewer<br/>Claude Sonnet 4.6<br/>Audit Router Decision"]
+    M -->|"Yes"| O["Reviewer<br/>Audit Router Decision"]
     O --> P{"Reviewer Verdict"}
 
     P -->|"Approve"| N
